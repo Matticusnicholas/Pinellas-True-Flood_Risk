@@ -1,0 +1,766 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Bermuda High Hurricane Steering - Florida Coast Analysis</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #0f172a;
+      color: #e2e8f0;
+      overflow: hidden;
+    }
+
+    .container {
+      display: flex;
+      height: 100vh;
+    }
+
+    #map {
+      flex: 1;
+      height: 100%;
+    }
+
+    .sidebar {
+      width: 380px;
+      background: #1e293b;
+      overflow-y: auto;
+      border-left: 1px solid #334155;
+    }
+
+    .sidebar-header {
+      padding: 1.5rem;
+      background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
+      text-align: center;
+    }
+
+    .sidebar-header h1 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+    }
+
+    .sidebar-header p {
+      font-size: 0.875rem;
+      opacity: 0.9;
+    }
+
+    .section {
+      padding: 1.25rem;
+      border-bottom: 1px solid #334155;
+    }
+
+    .section h2 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 0.75rem;
+      color: #60a5fa;
+    }
+
+    .section p {
+      font-size: 0.8125rem;
+      line-height: 1.6;
+      color: #cbd5e1;
+    }
+
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.75rem;
+      margin-top: 0.75rem;
+    }
+
+    .stat-card {
+      background: #334155;
+      padding: 0.75rem;
+      border-radius: 0.5rem;
+      text-align: center;
+    }
+
+    .stat-card .value {
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: #f59e0b;
+    }
+
+    .stat-card .label {
+      font-size: 0.6875rem;
+      color: #94a3b8;
+      margin-top: 0.25rem;
+    }
+
+    .region-list {
+      margin-top: 0.75rem;
+    }
+
+    .region-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.625rem 0;
+      border-bottom: 1px solid #334155;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .region-item:hover {
+      background: #334155;
+      margin: 0 -1.25rem;
+      padding: 0.625rem 1.25rem;
+    }
+
+    .region-item:last-child {
+      border-bottom: none;
+    }
+
+    .region-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      margin-right: 0.75rem;
+    }
+
+    .region-name {
+      flex: 1;
+      font-size: 0.8125rem;
+    }
+
+    .region-hits {
+      font-weight: 600;
+      font-size: 0.875rem;
+    }
+
+    .controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .control-btn {
+      padding: 0.5rem 0.75rem;
+      font-size: 0.75rem;
+      background: #334155;
+      border: 1px solid #475569;
+      color: #e2e8f0;
+      border-radius: 0.375rem;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+
+    .control-btn:hover {
+      background: #475569;
+    }
+
+    .control-btn.active {
+      background: #3b82f6;
+      border-color: #3b82f6;
+    }
+
+    .legend {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background: #0f172a;
+      border-radius: 0.5rem;
+    }
+
+    .legend-title {
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      color: #94a3b8;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      font-size: 0.6875rem;
+      margin-bottom: 0.25rem;
+    }
+
+    .legend-line {
+      width: 24px;
+      height: 3px;
+      margin-right: 0.5rem;
+      border-radius: 2px;
+    }
+
+    .highlight-box {
+      background: linear-gradient(135deg, #065f46 0%, #047857 100%);
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .highlight-box h3 {
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .highlight-box p {
+      font-size: 0.75rem;
+      opacity: 0.9;
+    }
+
+    .warning-box {
+      background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%);
+      padding: 1rem;
+      border-radius: 0.5rem;
+      margin-top: 0.75rem;
+    }
+
+    .warning-box h3 {
+      font-size: 0.875rem;
+      margin-bottom: 0.5rem;
+    }
+
+    .warning-box p {
+      font-size: 0.75rem;
+      opacity: 0.9;
+    }
+
+    /* Map controls */
+    .leaflet-control-zoom {
+      border: none !important;
+    }
+
+    .leaflet-control-zoom a {
+      background: #1e293b !important;
+      color: #e2e8f0 !important;
+      border: 1px solid #334155 !important;
+    }
+
+    .leaflet-control-zoom a:hover {
+      background: #334155 !important;
+    }
+
+    /* Info popup on map */
+    .map-info {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      z-index: 1000;
+      background: rgba(30, 41, 59, 0.95);
+      padding: 1rem;
+      border-radius: 0.5rem;
+      max-width: 300px;
+      border: 1px solid #334155;
+    }
+
+    .map-info h3 {
+      font-size: 0.9375rem;
+      margin-bottom: 0.5rem;
+      color: #60a5fa;
+    }
+
+    .map-info p {
+      font-size: 0.75rem;
+      line-height: 1.5;
+      color: #cbd5e1;
+    }
+
+    .bermuda-high-label {
+      background: rgba(251, 146, 60, 0.9);
+      padding: 0.5rem 0.75rem;
+      border-radius: 0.375rem;
+      font-weight: 600;
+      font-size: 0.75rem;
+      color: #1e293b;
+      white-space: nowrap;
+    }
+
+    .region-popup {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+
+    .region-popup h4 {
+      margin: 0 0 0.5rem;
+      color: #1e293b;
+    }
+
+    .region-popup p {
+      margin: 0.25rem 0;
+      font-size: 0.8125rem;
+      color: #475569;
+    }
+
+    .region-popup .stat {
+      font-weight: 600;
+      color: #1e40af;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div id="map"></div>
+
+    <div class="sidebar">
+      <div class="sidebar-header">
+        <h1>Bermuda High Hurricane Steering</h1>
+        <p>How atmospheric patterns protect Tampa Bay</p>
+      </div>
+
+      <div class="section">
+        <h2>The Bermuda High Effect</h2>
+        <p>
+          The Bermuda High (also called the Azores High) is a semi-permanent
+          high-pressure system over the Atlantic Ocean. Its western edge creates
+          clockwise steering currents that guide hurricanes entering the Gulf of Mexico.
+        </p>
+        <div class="highlight-box">
+          <h3>Key Finding</h3>
+          <p>
+            The typical position of the Bermuda High creates steering flow that
+            guides Gulf hurricanes toward the Florida Panhandle and Big Bend,
+            rather than Tampa Bay.
+          </p>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Hurricane Hits by Region (1900-2024)</h2>
+        <p>Click regions on the map for detailed statistics</p>
+        <div class="region-list" id="regionList">
+          <!-- Populated by JavaScript -->
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Hurricane Track Filters</h2>
+        <div class="controls">
+          <button class="control-btn active" data-filter="all">All Tracks</button>
+          <button class="control-btn" data-filter="cat3plus">Cat 3+ Only</button>
+          <button class="control-btn" data-filter="tampa-near">Near Tampa</button>
+          <button class="control-btn" data-filter="deflected">Deflected Away</button>
+        </div>
+        <div class="legend">
+          <div class="legend-title">Track Intensity</div>
+          <div class="legend-item">
+            <div class="legend-line" style="background: #22c55e;"></div>
+            <span>Tropical Storm</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-line" style="background: #eab308;"></div>
+            <span>Category 1-2</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-line" style="background: #f97316;"></div>
+            <span>Category 3</span>
+          </div>
+          <div class="legend-item">
+            <div class="legend-line" style="background: #ef4444;"></div>
+            <span>Category 4-5</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Tampa Bay Statistics</h2>
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="value">3</div>
+            <div class="label">Direct Hits<br>(since 1900)</div>
+          </div>
+          <div class="stat-card">
+            <div class="value">1921</div>
+            <div class="label">Last Major<br>Hurricane</div>
+          </div>
+          <div class="stat-card">
+            <div class="value">28</div>
+            <div class="label">Near Misses<br>(&lt;100 miles)</div>
+          </div>
+          <div class="stat-card">
+            <div class="value">~35%</div>
+            <div class="label">Lower Hit Rate<br>vs. State Avg</div>
+          </div>
+        </div>
+        <div class="warning-box">
+          <h3>Important Warning</h3>
+          <p>
+            Past patterns do NOT guarantee future protection. A hurricane taking
+            the "wrong" track could cause catastrophic damage to Tampa Bay.
+            Always follow evacuation orders.
+          </p>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="map-info" id="mapInfo">
+    <h3>Bermuda High Steering</h3>
+    <p>
+      The orange "H" shows the typical Bermuda High position.
+      Arrows show how it steers hurricanes. Click coastal regions to see impact statistics.
+    </p>
+  </div>
+
+  <script>
+    // ========== DATA ==========
+
+    // Coastal regions with hurricane statistics
+    const regions = [
+      {
+        id: 'panhandle',
+        name: 'Florida Panhandle',
+        color: '#ef4444',
+        hits: 37,
+        majorHits: 12,
+        lastMajor: 2018,
+        lastMajorName: 'Michael',
+        description: 'Highest hurricane frequency in Florida. Bermuda High steering often directs Gulf storms here.',
+        bounds: [
+          [30.5, -87.5], [30.5, -85.5], [29.5, -85.0], [29.5, -87.5]
+        ]
+      },
+      {
+        id: 'bigbend',
+        name: 'Big Bend',
+        color: '#f97316',
+        hits: 22,
+        majorHits: 5,
+        lastMajor: 2024,
+        lastMajorName: 'Helene',
+        description: 'Frequently impacted. The curve of the coastline catches storms deflected from Tampa Bay.',
+        bounds: [
+          [30.0, -85.0], [30.0, -83.5], [29.0, -83.0], [29.0, -84.5]
+        ]
+      },
+      {
+        id: 'tampa',
+        name: 'Tampa Bay',
+        color: '#22c55e',
+        hits: 3,
+        majorHits: 1,
+        lastMajor: 1921,
+        lastMajorName: 'Tampa Bay Hurricane',
+        description: 'Remarkably low hit rate. Bermuda High steering typically guides storms away.',
+        bounds: [
+          [28.2, -83.0], [28.2, -82.3], [27.4, -82.3], [27.4, -83.0]
+        ]
+      },
+      {
+        id: 'swfl',
+        name: 'Southwest Florida',
+        color: '#eab308',
+        hits: 18,
+        majorHits: 7,
+        lastMajor: 2022,
+        lastMajorName: 'Ian',
+        description: 'Moderate frequency. Catches storms that curve around the bottom of Florida.',
+        bounds: [
+          [27.4, -82.8], [27.4, -81.8], [26.0, -81.5], [26.0, -82.5]
+        ]
+      },
+      {
+        id: 'sefl',
+        name: 'Southeast Florida',
+        color: '#f97316',
+        hits: 42,
+        majorHits: 15,
+        lastMajor: 2005,
+        lastMajorName: 'Wilma',
+        description: 'High frequency due to Atlantic hurricanes. Different steering pattern than Gulf storms.',
+        bounds: [
+          [27.0, -80.5], [27.0, -79.8], [25.5, -79.8], [25.5, -80.5]
+        ]
+      },
+      {
+        id: 'keys',
+        name: 'Florida Keys',
+        color: '#ef4444',
+        hits: 35,
+        majorHits: 10,
+        lastMajor: 2017,
+        lastMajorName: 'Irma',
+        description: 'Very exposed position catches both Gulf and Atlantic hurricanes.',
+        bounds: [
+          [25.5, -81.8], [25.2, -80.2], [24.5, -80.2], [24.5, -81.8]
+        ]
+      }
+    ];
+
+    // Sample hurricane tracks (simplified for visualization)
+    const hurricaneTracks = [
+      // 2024 Helene - hit Big Bend
+      {
+        name: 'Helene',
+        year: 2024,
+        category: 4,
+        type: 'hit-bigbend',
+        points: [
+          [19.5, -84.0], [21.0, -85.5], [23.5, -86.0], [26.0, -85.5],
+          [28.0, -84.5], [30.0, -84.0], [32.0, -83.0]
+        ]
+      },
+      // 2022 Ian - hit SW Florida
+      {
+        name: 'Ian',
+        year: 2022,
+        category: 4,
+        type: 'hit-swfl',
+        points: [
+          [14.0, -62.0], [16.0, -70.0], [18.0, -78.0], [21.5, -83.0],
+          [24.0, -83.5], [26.5, -82.2], [28.0, -81.5], [30.0, -79.5]
+        ]
+      },
+      // 2018 Michael - hit Panhandle
+      {
+        name: 'Michael',
+        year: 2018,
+        category: 5,
+        type: 'hit-panhandle',
+        points: [
+          [18.0, -86.5], [20.0, -86.0], [23.0, -86.5], [26.0, -86.5],
+          [28.5, -85.8], [30.5, -85.5], [33.0, -83.0]
+        ]
+      },
+      // 2017 Irma - crossed Keys
+      {
+        name: 'Irma',
+        year: 2017,
+        category: 4,
+        type: 'hit-keys',
+        points: [
+          [16.0, -58.0], [18.0, -62.0], [21.0, -72.0], [23.0, -78.0],
+          [24.5, -80.5], [26.0, -81.5], [28.0, -82.0], [30.5, -82.5]
+        ]
+      },
+      // Deflected storm 1 - curved toward Panhandle
+      {
+        name: 'Deflected Example 1',
+        year: 2005,
+        category: 3,
+        type: 'deflected',
+        points: [
+          [20.0, -88.0], [23.0, -87.0], [25.5, -85.5], [27.5, -85.0],
+          [29.0, -85.5], [30.5, -86.0]
+        ]
+      },
+      // Deflected storm 2 - curved away from Tampa
+      {
+        name: 'Deflected Example 2',
+        year: 2016,
+        category: 1,
+        type: 'deflected',
+        points: [
+          [22.0, -85.0], [24.0, -85.5], [26.0, -84.5], [27.5, -83.5],
+          [29.0, -83.0], [31.0, -82.0]
+        ]
+      },
+      // Near miss Tampa
+      {
+        name: 'Near Miss Tampa',
+        year: 2004,
+        category: 2,
+        type: 'tampa-near',
+        points: [
+          [18.0, -80.0], [21.0, -82.0], [24.0, -83.0], [26.5, -82.5],
+          [28.0, -82.0], [29.5, -81.0]
+        ]
+      },
+      // 1921 Tampa direct hit
+      {
+        name: 'Tampa Bay Hurricane',
+        year: 1921,
+        category: 3,
+        type: 'hit-tampa',
+        points: [
+          [19.0, -83.0], [22.0, -84.5], [25.0, -84.0], [27.0, -83.0],
+          [28.0, -82.8], [29.5, -82.0]
+        ]
+      }
+    ];
+
+    // ========== MAP INITIALIZATION ==========
+
+    const map = L.map('map', {
+      center: [27.5, -84.5],
+      zoom: 6,
+      minZoom: 5,
+      maxZoom: 10
+    });
+
+    // Dark map tiles
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+      attribution: '&copy; OpenStreetMap, &copy; CARTO'
+    }).addTo(map);
+
+    // ========== REGIONS ==========
+
+    const regionLayers = {};
+
+    regions.forEach(region => {
+      const polygon = L.polygon(region.bounds, {
+        color: region.color,
+        weight: 2,
+        fillColor: region.color,
+        fillOpacity: 0.3
+      }).addTo(map);
+
+      polygon.bindPopup(`
+        <div class="region-popup">
+          <h4>${region.name}</h4>
+          <p class="stat">${region.hits} hurricane hits since 1900</p>
+          <p><strong>Major hurricanes:</strong> ${region.majorHits}</p>
+          <p><strong>Last major:</strong> ${region.lastMajorName} (${region.lastMajor})</p>
+          <p style="margin-top: 0.5rem">${region.description}</p>
+        </div>
+      `);
+
+      regionLayers[region.id] = polygon;
+    });
+
+    // Populate region list in sidebar
+    const regionList = document.getElementById('regionList');
+    regions.forEach(region => {
+      const item = document.createElement('div');
+      item.className = 'region-item';
+      item.innerHTML = `
+        <div class="region-color" style="background: ${region.color}"></div>
+        <span class="region-name">${region.name}</span>
+        <span class="region-hits" style="color: ${region.color}">${region.hits}</span>
+      `;
+      item.addEventListener('click', () => {
+        map.fitBounds(regionLayers[region.id].getBounds(), { padding: [50, 50] });
+        regionLayers[region.id].openPopup();
+      });
+      regionList.appendChild(item);
+    });
+
+    // ========== BERMUDA HIGH ==========
+
+    // Draw the Bermuda High pressure system
+    const bermudaHighCenter = [32, -65];
+
+    // High pressure circle
+    const highPressure = L.circle(bermudaHighCenter, {
+      radius: 800000,
+      color: '#fb923c',
+      weight: 2,
+      fillColor: '#fb923c',
+      fillOpacity: 0.15,
+      dashArray: '10, 5'
+    }).addTo(map);
+
+    // H label
+    const highLabel = L.marker(bermudaHighCenter, {
+      icon: L.divIcon({
+        className: 'bermuda-high-label',
+        html: 'H<br><small>Bermuda High</small>',
+        iconSize: [80, 40]
+      })
+    }).addTo(map);
+
+    // Steering arrows (clockwise flow)
+    const arrowPoints = [
+      { start: [28, -72], end: [25, -78], color: '#fb923c' },
+      { start: [25, -82], end: [27, -86], color: '#fb923c' },
+      { start: [27, -86], end: [30, -86], color: '#fb923c' },
+    ];
+
+    // ========== HURRICANE TRACKS ==========
+
+    const trackLayers = [];
+
+    function getTrackColor(category) {
+      if (category >= 4) return '#ef4444';
+      if (category === 3) return '#f97316';
+      if (category >= 1) return '#eab308';
+      return '#22c55e';
+    }
+
+    function drawTracks(filter = 'all') {
+      // Clear existing tracks
+      trackLayers.forEach(layer => map.removeLayer(layer));
+      trackLayers.length = 0;
+
+      hurricaneTracks.forEach(track => {
+        // Apply filter
+        if (filter === 'cat3plus' && track.category < 3) return;
+        if (filter === 'tampa-near' && track.type !== 'tampa-near' && track.type !== 'hit-tampa') return;
+        if (filter === 'deflected' && track.type !== 'deflected') return;
+
+        const polyline = L.polyline(track.points, {
+          color: getTrackColor(track.category),
+          weight: 3,
+          opacity: 0.8
+        }).addTo(map);
+
+        polyline.bindPopup(`
+          <div class="region-popup">
+            <h4>${track.name} (${track.year})</h4>
+            <p><strong>Category:</strong> ${track.category}</p>
+          </div>
+        `);
+
+        trackLayers.push(polyline);
+      });
+    }
+
+    // Initial draw
+    drawTracks('all');
+
+    // Filter controls
+    document.querySelectorAll('.control-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.querySelectorAll('.control-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        drawTracks(btn.dataset.filter);
+      });
+    });
+
+    // ========== STEERING FLOW ARROWS ==========
+
+    // Draw curved arrows showing steering flow
+    const steeringPath = [
+      [24, -76], [23, -80], [24, -84], [26, -86], [29, -86], [31, -84]
+    ];
+
+    const steeringArrow = L.polyline(steeringPath, {
+      color: '#fb923c',
+      weight: 4,
+      opacity: 0.6,
+      dashArray: '15, 10'
+    }).addTo(map);
+
+    // Add arrowhead at end
+    const arrowHead = L.marker([31, -84], {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="font-size: 24px; color: #fb923c; transform: rotate(-45deg);">&#10148;</div>',
+        iconSize: [24, 24]
+      })
+    }).addTo(map);
+
+    // Tampa Bay marker
+    const tampaBay = L.marker([27.77, -82.64], {
+      icon: L.divIcon({
+        className: '',
+        html: '<div style="background: #22c55e; color: white; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; white-space: nowrap;">Tampa Bay<br><small style="font-weight: normal">Protected Zone</small></div>',
+        iconSize: [90, 40]
+      })
+    }).addTo(map);
+
+    // Close info box after delay
+    setTimeout(() => {
+      document.getElementById('mapInfo').style.display = 'none';
+    }, 8000);
+
+    // Click to close info
+    document.getElementById('mapInfo').addEventListener('click', function() {
+      this.style.display = 'none';
+    });
+
+    console.log('Bermuda High Visualization loaded');
+  </script>
+</body>
+</html>
