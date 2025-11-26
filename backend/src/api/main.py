@@ -1,71 +1,70 @@
 """
 FastAPI Application for Pinellas True Flood Risk
 
-REST API that auto-initializes on startup:
-- First run: Fetches 50 years of historical data from NOAA (takes a few minutes)
-- Subsequent runs: Loads from cache (fast startup)
-
-All data is persisted to backend/data/processed/ for reuse.
+Starts instantly with no data fetching.
+Historical data can be downloaded via /api/v1/data/download endpoint.
 """
+import os
 import logging
-from typing import Optional, List
+from typing import Optional
 from datetime import datetime
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from ..config import PINELLAS_BOUNDS, ANALYSIS_CONFIG
-from ..models.schemas import TrueFloodRisk, RiskLevel
+from ..models.schemas import TrueFloodRisk
 from ..risk_engine.calculator import TrueFloodRiskCalculator
-from ..data_collection.data_manager import get_data_manager, ensure_data_initialized, DataStatus
 from ..data_collection.elevation_data import ElevationDataCollector
 from ..data_collection.property_data import PropertyDataCollector
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Global instances
 risk_calculator: Optional[TrueFloodRiskCalculator] = None
 elevation_collector: Optional[ElevationDataCollector] = None
 property_collector: Optional[PropertyDataCollector] = None
-data_status: Optional[DataStatus] = None
+data_download_status = {"downloading": False, "progress": "", "complete": False}
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Auto-initialize data and calculator on startup."""
-    global risk_calculator, elevation_collector, property_collector, data_status
+    """Fast startup - no data fetching."""
+    global risk_calculator, elevation_collector, property_collector
 
     logger.info("=" * 60)
-    logger.info("PINELLAS TRUE FLOOD RISK API")
+    logger.info("PINELLAS TRUE FLOOD RISK API - STARTING")
     logger.info("=" * 60)
 
-    # Auto-initialize data (fetches on first run, loads from cache after)
-    data_manager = get_data_manager()
-    data_status = ensure_data_initialized()
-
-    # Initialize collectors
+    # Initialize collectors (no network calls)
     elevation_collector = ElevationDataCollector()
     property_collector = PropertyDataCollector()
 
-    # Initialize risk calculator with historical data
-    risk_calculator = TrueFloodRiskCalculator(
-        flood_events=data_manager.flood_events,
-        hurricanes=data_manager.hurricanes,
-        atmospheric_analysis=data_manager.atmospheric
-    )
+    # Check if we have cached data
+    from ..data_collection.data_manager import get_data_manager
+    dm = get_data_manager()
+
+    if dm.is_initialized():
+        logger.info("Loading cached historical data...")
+        dm._load_all_from_cache()
+        risk_calculator = TrueFloodRiskCalculator(
+            flood_events=dm.flood_events,
+            hurricanes=dm.hurricanes,
+            atmospheric_analysis=dm.atmospheric
+        )
+        logger.info(f"  Flood events: {len(dm.flood_events)}")
+        logger.info(f"  Hurricanes: {len(dm.hurricanes)}")
+    else:
+        # Start with empty calculator (still works, just no historical data)
+        logger.info("No cached data found - starting with base calculations")
+        logger.info("Visit /api/v1/data/download to fetch historical data")
+        risk_calculator = TrueFloodRiskCalculator()
 
     logger.info("=" * 60)
     logger.info("API READY")
-    logger.info(f"  Flood events: {len(data_manager.flood_events)}")
-    logger.info(f"  Hurricanes: {len(data_manager.hurricanes)}")
-    logger.info(f"  Atmospheric: {'Ready' if data_manager.atmospheric else 'N/A'}")
     logger.info("=" * 60)
 
     yield
@@ -75,7 +74,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Pinellas True Flood Risk API",
-    description="Auto-initializing flood risk API with 50 years of historical data",
+    description="Flood risk API - starts instantly, historical data can be downloaded separately",
     version="1.0.0",
     lifespan=lifespan
 )
@@ -121,9 +120,11 @@ async def root():
         "name": "Pinellas True Flood Risk API",
         "version": "1.0.0",
         "status": "operational",
+        "has_historical_data": data_download_status["complete"],
         "endpoints": {
             "risk": "/api/v1/risk/location",
             "address": "/api/v1/risk/address",
+            "download_data": "/api/v1/data/download",
             "status": "/api/v1/status",
         }
     }
@@ -131,44 +132,96 @@ async def root():
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "ready": risk_calculator is not None}
+    return {"status": "healthy", "ready": True}
 
 
 @app.get("/api/v1/status")
 async def status():
-    """Get system status including data initialization state."""
+    """Get system status."""
+    from ..data_collection.data_manager import get_data_manager
     dm = get_data_manager()
+
     return {
-        "initialized": dm.is_initialized(),
-        "flood_events": len(dm.flood_events),
-        "hurricanes": len(dm.hurricanes),
-        "atmospheric": dm.atmospheric is not None,
-        "last_updated": data_status.last_updated.isoformat() if data_status and data_status.last_updated else None
+        "api_ready": True,
+        "has_historical_data": dm.is_initialized(),
+        "flood_events": len(dm.flood_events) if dm._flood_events else 0,
+        "hurricanes": len(dm.hurricanes) if dm._hurricanes else 0,
+        "data_download": data_download_status
     }
 
 
-@app.post("/api/v1/data/refresh")
-async def refresh_data():
-    """Force refresh all cached data."""
-    global risk_calculator, data_status
+def _download_data_background():
+    """Background task to download historical data."""
+    global risk_calculator, data_download_status
 
-    dm = get_data_manager()
-    data_status = dm.initialize(force_refresh=True)
+    try:
+        data_download_status["downloading"] = True
+        data_download_status["progress"] = "Starting download..."
 
-    risk_calculator = TrueFloodRiskCalculator(
-        flood_events=dm.flood_events,
-        hurricanes=dm.hurricanes,
-        atmospheric_analysis=dm.atmospheric
-    )
+        from ..data_collection.data_manager import get_data_manager
+        dm = get_data_manager()
 
-    return {"success": True, "flood_events": len(dm.flood_events), "hurricanes": len(dm.hurricanes)}
+        # Download with progress updates
+        data_download_status["progress"] = "Downloading flood events from NOAA..."
+        dm._fetch_flood_events()
+
+        data_download_status["progress"] = "Downloading hurricane data..."
+        dm._fetch_hurricanes()
+
+        data_download_status["progress"] = "Generating atmospheric analysis..."
+        dm._generate_atmospheric()
+
+        # Save status
+        from ..data_collection.data_manager import DataStatus
+        status = DataStatus(
+            flood_events_ready=True,
+            flood_events_count=len(dm._flood_events or []),
+            hurricanes_ready=True,
+            hurricanes_count=len(dm._hurricanes or []),
+            atmospheric_ready=True,
+            last_updated=datetime.now(),
+            is_demo_data=False
+        )
+        dm.save_status(status)
+
+        # Update calculator
+        risk_calculator = TrueFloodRiskCalculator(
+            flood_events=dm.flood_events,
+            hurricanes=dm.hurricanes,
+            atmospheric_analysis=dm.atmospheric
+        )
+
+        data_download_status["downloading"] = False
+        data_download_status["complete"] = True
+        data_download_status["progress"] = f"Complete! {len(dm.flood_events)} flood events, {len(dm.hurricanes)} hurricanes"
+
+    except Exception as e:
+        logger.error(f"Download failed: {e}")
+        data_download_status["downloading"] = False
+        data_download_status["progress"] = f"Error: {str(e)}"
+
+
+@app.post("/api/v1/data/download")
+async def download_data(background_tasks: BackgroundTasks):
+    """Start downloading historical data in background."""
+    if data_download_status["downloading"]:
+        return {"message": "Download already in progress", "status": data_download_status}
+
+    background_tasks.add_task(_download_data_background)
+    return {"message": "Download started in background", "status": data_download_status}
+
+
+@app.get("/api/v1/data/download/status")
+async def download_status():
+    """Check data download progress."""
+    return data_download_status
 
 
 @app.post("/api/v1/risk/location", response_model=RiskResponse)
 async def calculate_risk_by_location(request: RiskRequest):
     """Calculate flood risk for a lat/lon location."""
     if not risk_calculator:
-        raise HTTPException(503, "Not initialized yet")
+        raise HTTPException(503, "Not initialized")
 
     try:
         elevation_m = request.elevation_m
@@ -244,10 +297,11 @@ async def get_fema_zone(lat: float = Query(..., ge=27.5, le=28.2), lon: float = 
 
 @app.get("/api/v1/stats/floods")
 async def flood_stats():
+    from ..data_collection.data_manager import get_data_manager
     dm = get_data_manager()
     events = dm.flood_events
     if not events:
-        return {"message": "No data", "count": 0}
+        return {"message": "No data - use /api/v1/data/download to fetch", "count": 0}
 
     by_type = {}
     for e in events:
@@ -258,10 +312,11 @@ async def flood_stats():
 
 @app.get("/api/v1/stats/hurricanes")
 async def hurricane_stats():
+    from ..data_collection.data_manager import get_data_manager
     dm = get_data_manager()
     hurricanes = dm.hurricanes
     if not hurricanes:
-        return {"message": "No data", "count": 0}
+        return {"message": "No data - use /api/v1/data/download to fetch", "count": 0}
 
     near = [h for h in hurricanes if h.closest_approach_to_pinellas_km and h.closest_approach_to_pinellas_km < 200]
     return {"total": len(hurricanes), "near_pinellas": len(near), "direct_hits": len([h for h in near if h.closest_approach_to_pinellas_km < 50])}

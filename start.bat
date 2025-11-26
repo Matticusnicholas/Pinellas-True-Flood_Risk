@@ -7,147 +7,84 @@ echo     PINELLAS TRUE FLOOD RISK ASSESSMENT TOOL
 echo ============================================================
 echo.
 
-:: Check for command line argument
-set QUICK_START=1
-if "%1"=="--full" set QUICK_START=0
-if "%1"=="-f" set QUICK_START=0
-
-:: Check if Python is available
-where python >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Python is not installed or not in PATH
-    echo Please install Python 3.10+ from https://python.org
-    pause
-    exit /b 1
-)
-
-:: Check if Node.js is available
-where node >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    echo ERROR: Node.js is not installed or not in PATH
-    echo Please install Node.js from https://nodejs.org
-    pause
-    exit /b 1
-)
-
 :: Navigate to project root
 cd /d "%~dp0"
 
-:: Check/create Python virtual environment
+:: Check Python
+where python >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Python not found. Install from https://python.org
+    pause
+    exit /b 1
+)
+
+:: Check Node
+where node >nul 2>nul
+if %ERRORLEVEL% neq 0 (
+    echo ERROR: Node.js not found. Install from https://nodejs.org
+    pause
+    exit /b 1
+)
+
+:: Setup Python venv if needed
 if not exist "backend\venv" (
     echo Creating Python virtual environment...
     python -m venv backend\venv
 )
 
-:: Activate virtual environment and install dependencies
-echo.
-echo Checking Python dependencies...
+:: Install Python deps
+echo Installing Python dependencies...
 call backend\venv\Scripts\activate.bat
 pip install -q -r backend\requirements.txt 2>nul
 
-:: Check/install Node dependencies
+:: Install Node deps if needed
 if not exist "frontend\node_modules" (
-    echo.
     echo Installing frontend dependencies...
     cd frontend
     call npm install
     cd ..
-) else (
-    echo Frontend dependencies already installed.
 )
 
-:: Show startup mode
+:: Start backend
 echo.
-if "%QUICK_START%"=="1" (
-    echo MODE: Quick Start (instant startup with demo calculations)
-    echo       Run "start.bat --full" to download real NOAA data
-) else (
-    echo MODE: Full Data (downloading historical data from NOAA)
-    echo       This may take 5-10 minutes on first run...
-)
-echo.
+echo Starting API server...
+start "FloodRiskAPI" /min cmd /c "cd /d "%~dp0backend" && ..\backend\venv\Scripts\activate.bat && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000"
 
-:: Check if real data exists
-if exist "backend\data\processed\data_status.json" (
-    findstr /c:"is_demo_data\": false" "backend\data\processed\data_status.json" >nul 2>nul
-    if %ERRORLEVEL% equ 0 (
-        echo Historical data cache found - loading from cache.
-        set QUICK_START=0
-    )
-)
-
-:: Start backend server
-echo.
-echo Starting backend API server...
-start "Flood Risk API" /min cmd /c "cd /d "%~dp0" && call backend\venv\Scripts\activate.bat && set QUICK_START=%QUICK_START% && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --app-dir backend"
-
-:: Wait for backend to start (shorter wait for quick start)
-echo Waiting for API to initialize...
-
-if "%QUICK_START%"=="1" (
-    timeout /t 3 /nobreak >nul
-) else (
-    timeout /t 5 /nobreak >nul
-)
-
-:: Check if backend is running (with timeout)
-set ATTEMPTS=0
-:check_backend
-set /a ATTEMPTS+=1
-curl -s http://127.0.0.1:8000/health >nul 2>nul
-if %ERRORLEVEL% neq 0 (
-    if %ATTEMPTS% gtr 60 (
-        echo.
-        echo ERROR: API failed to start after 5 minutes.
-        echo Check the "Flood Risk API" window for errors.
-        pause
-        exit /b 1
-    )
-    if %ATTEMPTS% gtr 12 (
-        echo Still initializing... (%ATTEMPTS%/60 - downloading NOAA data)
-    ) else (
-        echo Starting...
-    )
-    timeout /t 5 /nobreak >nul
-    goto check_backend
-)
-
-echo Backend API is ready!
-echo.
-
-:: Start frontend
-echo Starting web interface...
-cd frontend
-start "Flood Risk Frontend" cmd /c "npm run dev"
-cd ..
-
-:: Wait for frontend
+:: Wait a moment then start frontend
 timeout /t 3 /nobreak >nul
 
-:: Open browser
+echo Starting web interface...
+cd frontend
+start "FloodRiskWeb" cmd /c "npm run dev"
+cd ..
+
+:: Wait for API
+echo Waiting for API...
+:wait_loop
+timeout /t 2 /nobreak >nul
+curl -s http://127.0.0.1:8000/health >nul 2>nul
+if %ERRORLEVEL% neq 0 goto wait_loop
+
 echo.
 echo ============================================================
-echo  APPLICATION READY
+echo  READY!
 echo ============================================================
 echo.
-echo  Web Interface: http://localhost:3000
-echo  API Docs:      http://127.0.0.1:8000/docs
+echo  Web App:  http://localhost:3000
+echo  API:      http://127.0.0.1:8000
+echo  API Docs: http://127.0.0.1:8000/docs
 echo.
-echo  To download full historical data, visit:
-echo    http://127.0.0.1:8000/api/v1/data/refresh
+echo  To download historical NOAA data, visit:
+echo    http://127.0.0.1:8000/docs#/default/download_data_api_v1_data_download_post
 echo.
 echo  Press any key to stop all services.
 echo ============================================================
-echo.
 
-:: Open browser automatically
+:: Open browser
 start http://localhost:3000
 
-:: Keep window open
 pause >nul
 
-:: Cleanup - kill background processes
-echo Shutting down...
-taskkill /FI "WINDOWTITLE eq Flood Risk API" /F >nul 2>nul
-taskkill /FI "WINDOWTITLE eq Flood Risk Frontend" /F >nul 2>nul
-echo Done.
+:: Cleanup
+taskkill /FI "WINDOWTITLE eq FloodRiskAPI" /F >nul 2>nul
+taskkill /FI "WINDOWTITLE eq FloodRiskWeb" /F >nul 2>nul
