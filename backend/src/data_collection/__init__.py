@@ -3,3 +3,4 @@ from .hurricane_tracks import HurricaneTrackCollector
 from .elevation_data import ElevationDataCollector
 from .property_data import PropertyDataCollector
 from .atmospheric_data import AtmosphericDataCollector
+from .data_manager import DataManager, get_data_manager, ensure_data_initialized
