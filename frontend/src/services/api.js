@@ -5,6 +5,79 @@
 const API_BASE = '/api/v1';
 
 /**
+ * Autocomplete address search
+ */
+export async function autocompleteAddress(query) {
+  if (!query || query.length < 2) {
+    return { results: [] };
+  }
+
+  try {
+    const response = await fetch(
+      `${API_BASE}/addresses/autocomplete?q=${encodeURIComponent(query)}`
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error in autocomplete:', error);
+    return { results: [] };
+  }
+}
+
+/**
+ * Calculate risk using address from database (most accurate)
+ */
+export async function calculateRiskByAddressLookup(fullAddress) {
+  try {
+    const response = await fetch(
+      `${API_BASE}/risk/address-lookup?address=${encodeURIComponent(fullAddress)}`,
+      { method: 'POST' }
+    );
+
+    if (!response.ok) {
+      throw new Error(`HTTP error: ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (error) {
+    console.error('Error calculating risk by address lookup:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+/**
+ * Download address database
+ */
+export async function downloadAddresses() {
+  try {
+    const response = await fetch(`${API_BASE}/addresses/download`, {
+      method: 'POST'
+    });
+    return await response.json();
+  } catch (error) {
+    console.error('Error starting address download:', error);
+    return { error: error.message };
+  }
+}
+
+/**
+ * Check address download status
+ */
+export async function getAddressDownloadStatus() {
+  try {
+    const response = await fetch(`${API_BASE}/addresses/download/status`);
+    return await response.json();
+  } catch (error) {
+    console.error('Error checking address status:', error);
+    return { addresses_loaded: 0 };
+  }
+}
+
+/**
  * Calculate flood risk for a lat/lon location
  */
 export async function calculateRisk(lat, lon, options = {}) {

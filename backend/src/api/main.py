@@ -19,6 +19,7 @@ from ..models.schemas import TrueFloodRisk
 from ..risk_engine.calculator import TrueFloodRiskCalculator
 from ..data_collection.elevation_data import ElevationDataCollector
 from ..data_collection.property_data import PropertyDataCollector
+from ..data_collection.address_database import get_address_database
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -28,6 +29,7 @@ risk_calculator: Optional[TrueFloodRiskCalculator] = None
 elevation_collector: Optional[ElevationDataCollector] = None
 property_collector: Optional[PropertyDataCollector] = None
 data_download_status = {"downloading": False, "progress": "", "complete": False}
+address_download_status = {"downloading": False, "progress": "", "complete": False, "count": 0}
 
 
 @asynccontextmanager
@@ -334,6 +336,119 @@ async def methodology():
         },
         "risk_levels": {"very_low": "0-20", "low": "21-40", "moderate": "41-60", "high": "61-80", "very_high": "81-100"}
     }
+
+
+# ============ Address Autocomplete ============
+
+@app.get("/api/v1/addresses/autocomplete")
+async def autocomplete_address(q: str = Query(..., min_length=2, description="Search query")):
+    """
+    Autocomplete address search.
+
+    Returns matching addresses from Pinellas County database with exact coordinates.
+    Download the address database first via /api/v1/addresses/download
+    """
+    addr_db = get_address_database()
+
+    if not addr_db.is_loaded():
+        return {
+            "results": [],
+            "message": "Address database not loaded. Use /api/v1/addresses/download to fetch addresses."
+        }
+
+    results = addr_db.autocomplete(q, limit=10)
+    return {"results": results, "count": len(results)}
+
+
+@app.get("/api/v1/addresses/lookup")
+async def lookup_address(address: str = Query(..., description="Full address to look up")):
+    """
+    Look up exact address and get coordinates.
+
+    Use autocomplete to find the correct address format first.
+    """
+    addr_db = get_address_database()
+
+    if not addr_db.is_loaded():
+        raise HTTPException(400, "Address database not loaded. Use /api/v1/addresses/download first.")
+
+    result = addr_db.get_address(address)
+
+    if not result:
+        raise HTTPException(404, f"Address not found: {address}")
+
+    return result
+
+
+def _download_addresses_background():
+    """Background task to download address database."""
+    global address_download_status
+
+    try:
+        address_download_status["downloading"] = True
+        address_download_status["progress"] = "Downloading Pinellas County addresses..."
+
+        addr_db = get_address_database()
+        count = addr_db.download_addresses(limit=100000)
+
+        address_download_status["downloading"] = False
+        address_download_status["complete"] = True
+        address_download_status["count"] = count
+        address_download_status["progress"] = f"Complete! {count} addresses loaded"
+
+    except Exception as e:
+        logger.error(f"Address download failed: {e}")
+        address_download_status["downloading"] = False
+        address_download_status["progress"] = f"Error: {str(e)}"
+
+
+@app.post("/api/v1/addresses/download")
+async def download_addresses(background_tasks: BackgroundTasks):
+    """
+    Download Pinellas County address database for autocomplete.
+
+    This downloads ~50,000+ addresses from Pinellas County's open data.
+    Runs in background - check status at /api/v1/addresses/download/status
+    """
+    if address_download_status["downloading"]:
+        return {"message": "Download already in progress", "status": address_download_status}
+
+    background_tasks.add_task(_download_addresses_background)
+    return {"message": "Address download started in background", "status": address_download_status}
+
+
+@app.get("/api/v1/addresses/download/status")
+async def address_download_progress():
+    """Check address database download progress."""
+    addr_db = get_address_database()
+    return {
+        **address_download_status,
+        "addresses_loaded": len(addr_db.addresses) if addr_db.is_loaded() else 0
+    }
+
+
+@app.post("/api/v1/risk/address-lookup")
+async def calculate_risk_by_address_lookup(address: str = Query(..., description="Full address from autocomplete")):
+    """
+    Calculate flood risk using address from the database (most accurate).
+
+    Use /api/v1/addresses/autocomplete to find the correct address first.
+    """
+    addr_db = get_address_database()
+
+    if not addr_db.is_loaded():
+        raise HTTPException(400, "Address database not loaded. Use /api/v1/addresses/download first.")
+
+    addr_data = addr_db.get_address(address)
+
+    if not addr_data:
+        raise HTTPException(404, f"Address not found in database: {address}")
+
+    return await calculate_risk_by_location(RiskRequest(
+        lat=addr_data['lat'],
+        lon=addr_data['lon'],
+        address=addr_data['full_address']
+    ))
 
 
 if __name__ == "__main__":
