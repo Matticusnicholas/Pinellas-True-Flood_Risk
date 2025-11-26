@@ -246,35 +246,48 @@ class StormSurgeAnalyzer:
 
         Note: This is an estimate. Official evacuation zones should be
         consulted from Pinellas County Emergency Management.
-        """
-        # Zone A: Evacuate for any tropical storm or hurricane
-        # Zone B: Evacuate for Category 1+
-        # Zone C: Evacuate for Category 2+
-        # Zone D: Evacuate for Category 3+
-        # Zone E: Evacuate for Category 4+
 
+        Pinellas County zones are based on storm surge vulnerability:
+        - Zone A: Mobile homes + most vulnerable areas (barrier islands, low-lying coast)
+        - Zone B: Slightly higher areas still at risk from Cat 1+
+        - Zone C: Areas at risk from Cat 2+
+        - Zone D: Areas at risk from Cat 3+
+        - Zone E: Areas at risk from Cat 4+
+        """
+        # Zone baseline - more nuanced based on actual geography
         zone_baseline = {
-            'hillsborough_bay': 'A',
-            'upper_bay': 'A',
-            'old_tampa_bay': 'A',
-            'middle_bay': 'A',
-            'lower_bay': 'B',
+            'hillsborough_bay': 'A',  # Very low-lying
+            'upper_bay': 'B',
+            'old_tampa_bay': 'B',
+            'middle_bay': 'B',
+            'lower_bay': 'C',
             'bay_mouth': 'B',
             'gulf_beach': 'A',  # Barrier islands always Zone A
         }
 
-        base = zone_baseline.get(surge_zone, 'B')
+        base = zone_baseline.get(surge_zone, 'C')
+        zone_order = ['A', 'B', 'C', 'D', 'E', 'Non-Evac']
 
-        # Adjust by elevation
+        # Adjust by elevation - this is the key factor
         if elevation_m is not None:
-            if elevation_m > 10:
-                # High elevation might reduce zone
-                zone_order = ['A', 'B', 'C', 'D', 'E', 'Non-Evac']
+            if elevation_m < 2:
+                # Very low - stay at base or move to A
+                idx = zone_order.index(base) if base in zone_order else 0
+                idx = max(0, idx - 1)  # Move towards A
+                return zone_order[idx]
+            elif elevation_m < 4:
+                # Low - use baseline
+                return base
+            elif elevation_m > 15:
+                # Very high elevation - unlikely to need evacuation for surge
+                return 'Non-Evac'
+            elif elevation_m > 10:
+                # High elevation - reduce by 2 zones
                 idx = zone_order.index(base) if base in zone_order else 0
                 idx = min(idx + 2, len(zone_order) - 1)
                 return zone_order[idx]
             elif elevation_m > 6:
-                zone_order = ['A', 'B', 'C', 'D', 'E', 'Non-Evac']
+                # Moderate-high elevation - reduce by 1 zone
                 idx = zone_order.index(base) if base in zone_order else 0
                 idx = min(idx + 1, len(zone_order) - 1)
                 return zone_order[idx]

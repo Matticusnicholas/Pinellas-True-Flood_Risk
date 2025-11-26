@@ -68,26 +68,26 @@ function RiskDisplay({ risk, details }) {
           textAlign: 'left',
           fontSize: '0.8125rem'
         }}>
-          {details.elevation_m && (
+          {details.elevation_m != null && (
             <p>
               <strong>Elevation:</strong> {details.elevation_m.toFixed(1)}m ({details.elevation_ft.toFixed(1)}ft)
-            </p>
-          )}
-          {details.storm_surge?.evacuation_zone && (
-            <p>
-              <strong>Evacuation Zone:</strong> Zone {details.storm_surge.evacuation_zone}
             </p>
           )}
         </div>
       )}
 
-      {/* FEMA Comparison */}
+      {/* FEMA Flood Zone - Primary zone display */}
       {risk.fema_flood_zone && (
         <div className="fema-comparison">
-          <h4>FEMA Comparison</h4>
+          <h4>FEMA Flood Zone</h4>
           <span className="fema-zone-badge">{risk.fema_flood_zone}</span>
+          {details?.fema_interpretation && (
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
+              {details.fema_interpretation.description}
+            </p>
+          )}
           {risk.fema_comparison && (
-            <div className={`comparison-indicator comparison-${risk.fema_comparison}`}>
+            <div className={`comparison-indicator comparison-${risk.fema_comparison}`} style={{ marginTop: '0.5rem' }}>
               {risk.fema_comparison === 'higher' && (
                 <>↑ Our analysis suggests <strong>higher risk</strong> than FEMA indicates</>
               )}
@@ -99,11 +99,26 @@ function RiskDisplay({ risk, details }) {
               )}
             </div>
           )}
-          {details?.fema_interpretation && (
-            <p style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.5rem' }}>
-              {details.fema_interpretation.description}
-            </p>
-          )}
+        </div>
+      )}
+
+      {/* Hurricane Evacuation Zone - separate from FEMA flood zone */}
+      {details?.storm_surge?.evacuation_zone && (
+        <div style={{
+          background: '#fef3c7',
+          border: '1px solid #fcd34d',
+          borderRadius: '0.5rem',
+          padding: '0.75rem',
+          marginTop: '1rem',
+          fontSize: '0.8125rem'
+        }}>
+          <strong>Hurricane Evacuation Zone: {details.storm_surge.evacuation_zone}</strong>
+          <p style={{ fontSize: '0.75rem', color: '#92400e', marginTop: '0.25rem', marginBottom: 0 }}>
+            {getEvacuationDescription(details.storm_surge.evacuation_zone)}
+          </p>
+          <p style={{ fontSize: '0.6875rem', color: '#78716c', marginTop: '0.25rem', marginBottom: 0 }}>
+            (Different from FEMA Flood Zone - this is for hurricane evacuation)
+          </p>
         </div>
       )}
 
@@ -165,6 +180,18 @@ function formatRiskLevel(level) {
     .join(' ');
 }
 
+function getEvacuationDescription(zone) {
+  const descriptions = {
+    'A': 'Evacuate for ANY tropical storm or hurricane threat',
+    'B': 'Evacuate when ordered for Category 1+ hurricanes',
+    'C': 'Evacuate when ordered for Category 2+ hurricanes',
+    'D': 'Evacuate when ordered for Category 3+ hurricanes',
+    'E': 'Evacuate when ordered for Category 4+ hurricanes',
+    'Non-Evac': 'Not in a storm surge evacuation zone'
+  };
+  return descriptions[zone] || 'Check local emergency management for evacuation orders';
+}
+
 function getRecommendations(risk, details) {
   const recommendations = [];
 
@@ -187,22 +214,11 @@ function getRecommendations(risk, details) {
   // Based on FEMA comparison
   if (risk.fema_comparison === 'higher') {
     recommendations.push(
-      `Consider additional flood protection despite being in FEMA Zone ${risk.fema_flood_zone}`
+      `Consider additional flood protection despite being in FEMA Flood Zone ${risk.fema_flood_zone}`
     );
   } else if (risk.fema_comparison === 'lower') {
     recommendations.push(
       'You may want to review your flood insurance coverage - you might be overpaying'
-    );
-  }
-
-  // Based on evacuation zone
-  if (details?.storm_surge?.evacuation_zone === 'A') {
-    recommendations.push(
-      'Zone A: Evacuate for ANY tropical storm or hurricane threat'
-    );
-  } else if (details?.storm_surge?.evacuation_zone === 'B') {
-    recommendations.push(
-      'Zone B: Evacuate when ordered for Category 1+ hurricanes'
     );
   }
 
