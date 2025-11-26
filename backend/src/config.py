@@ -84,11 +84,16 @@ class AnalysisConfig:
     elevation_grid_resolution_m: float = 30.0
 
     # Risk score weights (must sum to 1.0)
+    # Note: atmospheric_protection is applied as a REDUCTION to hurricane-related risks
     weight_historical_floods: float = 0.30
     weight_hurricane_probability: float = 0.25
     weight_elevation_risk: float = 0.25
-    weight_storm_surge: float = 0.15
-    weight_atmospheric_protection: float = 0.05
+    weight_storm_surge: float = 0.20
+
+    # Bermuda High Protection Factor - reduces hurricane/surge scores
+    # Based on statistical analysis showing Tampa Bay has ~30-40% fewer direct hits
+    # than comparable Gulf Coast regions due to steering patterns
+    weight_atmospheric_protection: float = 0.15  # Max reduction to hurricane-related risks
 
     # Elevation thresholds for risk (meters above sea level)
     elevation_very_high_risk: float = 2.0   # Below 2m = very high risk

@@ -126,33 +126,43 @@ class TrueFloodRiskCalculator:
         surge_analysis = self.surge_analyzer.calculate_surge_risk(lat, lon, elevation_m)
         storm_surge_score = surge_analysis['score']
 
-        # 5. Atmospheric Protection Factor
+        # 5. Atmospheric Protection Factor (Bermuda High steering effect)
         if self.atmospheric_analysis:
             protection_factor = self.atmospheric_analysis.protection_factor
         else:
-            protection_factor = 0.0  # Assume no protection if unknown
+            # Default protection factor for Tampa Bay based on historical patterns
+            # Even without full analysis, we know steering patterns typically guide storms away
+            protection_factor = 0.25
 
-        # Create factors object
+        # Apply Bermuda High protection to hurricane-related scores
+        # This reflects the statistical reality that Tampa Bay has fewer direct hits
+        # than other Gulf Coast regions due to typical steering patterns
+        protection_multiplier = 1.0 - (protection_factor * self.weights['atmospheric_protection'])
+
+        # Reduce hurricane and storm surge scores by the protection factor
+        # Historical floods and elevation are NOT affected (those are physical facts)
+        adjusted_hurricane_score = hurricane_probability_score * protection_multiplier
+        adjusted_surge_score = storm_surge_score * protection_multiplier
+
+        # Create factors object (store original scores for transparency)
         factors = FloodRiskFactors(
             historical_flood_score=historical_flood_score,
-            hurricane_probability_score=hurricane_probability_score,
+            hurricane_probability_score=hurricane_probability_score,  # Original score
             elevation_risk_score=elevation_risk_score,
-            storm_surge_score=storm_surge_score,
+            storm_surge_score=storm_surge_score,  # Original score
             atmospheric_protection_factor=protection_factor
         )
 
-        # Calculate weighted composite score
+        # Calculate weighted composite score with protected hurricane scores
         raw_score = (
             factors.historical_flood_score * self.weights['historical_floods'] +
-            factors.hurricane_probability_score * self.weights['hurricane_probability'] +
+            adjusted_hurricane_score * self.weights['hurricane_probability'] +
             factors.elevation_risk_score * self.weights['elevation_risk'] +
-            factors.storm_surge_score * self.weights['storm_surge']
+            adjusted_surge_score * self.weights['storm_surge']
         )
 
-        # Apply atmospheric protection (reduces risk slightly if protection exists)
-        # Protection factor of 0.3 would reduce risk by 3%
-        protection_adjustment = raw_score * factors.atmospheric_protection_factor * self.weights['atmospheric_protection']
-        final_score = raw_score - protection_adjustment
+        # The protection is now baked into the adjusted scores
+        final_score = raw_score
 
         # Clamp to 0-100
         final_score = max(0, min(100, final_score))

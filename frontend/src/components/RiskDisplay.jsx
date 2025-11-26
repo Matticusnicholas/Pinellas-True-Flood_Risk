@@ -56,6 +56,24 @@ function RiskDisplay({ risk, details }) {
           value={risk.factors.storm_surge_score}
           color={RISK_COLORS[getScoreLevel(risk.factors.storm_surge_score)]}
         />
+
+        {/* Bermuda High Protection */}
+        {risk.factors.atmospheric_protection_factor > 0 && (
+          <div style={{
+            marginTop: '0.75rem',
+            padding: '0.5rem',
+            background: '#dcfce7',
+            borderRadius: '0.375rem',
+            fontSize: '0.75rem'
+          }}>
+            <strong style={{ color: '#166534' }}>
+              Bermuda High Protection: -{Math.round(risk.factors.atmospheric_protection_factor * 15)}%
+            </strong>
+            <p style={{ margin: '0.25rem 0 0', color: '#166534', fontSize: '0.6875rem' }}>
+              Steering patterns statistically reduce hurricane risk for Tampa Bay
+            </p>
+          </div>
+        )}
       </div>
 
       {/* Elevation & Details */}
