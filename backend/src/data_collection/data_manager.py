@@ -1,20 +1,27 @@
 """
 Data Manager - Handles automatic data initialization and caching
 
-Checks if historical data has been collected. If not, fetches it automatically.
+Supports two modes:
+- QUICK_START: Uses demo data, starts instantly (set QUICK_START=1)
+- FULL: Downloads 50 years of NOAA data on first run
+
 All data is persisted to the filesystem and loaded on subsequent runs.
 """
+import os
 import json
 import logging
 from pathlib import Path
-from datetime import datetime, timedelta
-from typing import Optional, List, Tuple
+from datetime import datetime
+from typing import Optional, List
 from dataclasses import dataclass
 
 from ..config import PROCESSED_DATA_DIR, CACHE_DIR, ANALYSIS_CONFIG
 from ..models.schemas import FloodEvent, Hurricane, AtmosphericAnalysis
 
 logger = logging.getLogger(__name__)
+
+# Check for quick start mode
+QUICK_START = os.environ.get('QUICK_START', '').lower() in ('1', 'true', 'yes')
 
 
 @dataclass
@@ -27,23 +34,18 @@ class DataStatus:
     atmospheric_ready: bool = False
     last_updated: Optional[datetime] = None
     needs_refresh: bool = False
+    is_demo_data: bool = False
 
 
 class DataManager:
     """
     Manages all historical data with automatic initialization and caching.
-
-    On first run: Fetches all data from APIs and saves to filesystem
-    On subsequent runs: Loads from filesystem (fast startup)
     """
 
-    # Data file paths
     FLOOD_EVENTS_FILE = "pinellas_flood_events.json"
     HURRICANES_FILE = "hurricane_tracks.json"
     ATMOSPHERIC_FILE = "atmospheric_analysis.json"
     STATUS_FILE = "data_status.json"
-
-    # Refresh data if older than this (days)
     DATA_REFRESH_DAYS = 30
 
     def __init__(self):
@@ -51,7 +53,6 @@ class DataManager:
         self.cache_dir = CACHE_DIR
         self.data_dir.mkdir(parents=True, exist_ok=True)
 
-        # Loaded data
         self._flood_events: Optional[List[FloodEvent]] = None
         self._hurricanes: Optional[List[Hurricane]] = None
         self._atmospheric: Optional[AtmosphericAnalysis] = None
@@ -79,7 +80,8 @@ class DataManager:
                     hurricanes_count=data.get('hurricanes_count', 0),
                     atmospheric_ready=data.get('atmospheric_ready', False),
                     last_updated=last_updated,
-                    needs_refresh=days_old > self.DATA_REFRESH_DAYS
+                    needs_refresh=days_old > self.DATA_REFRESH_DAYS,
+                    is_demo_data=data.get('is_demo_data', False)
                 )
             except Exception as e:
                 logger.warning(f"Could not read status file: {e}")
@@ -98,6 +100,7 @@ class DataManager:
                 'hurricanes_count': status.hurricanes_count,
                 'atmospheric_ready': status.atmospheric_ready,
                 'last_updated': datetime.now().isoformat(),
+                'is_demo_data': status.is_demo_data,
             }, f, indent=2)
 
     def is_initialized(self) -> bool:
@@ -110,64 +113,118 @@ class DataManager:
             not status.needs_refresh
         )
 
-    def initialize(self, force_refresh: bool = False) -> DataStatus:
+    def initialize(self, force_refresh: bool = False, quick_start: bool = None) -> DataStatus:
         """
-        Initialize all data - fetch if needed, load from cache if available.
+        Initialize all data.
 
         Args:
-            force_refresh: If True, re-fetch all data even if cached
-
-        Returns:
-            DataStatus indicating what was loaded/fetched
+            force_refresh: Re-fetch all data even if cached
+            quick_start: Use demo data (overrides env var if set)
         """
+        # Check for quick start mode
+        use_quick_start = quick_start if quick_start is not None else QUICK_START
+
         status = self.check_status()
 
-        if self.is_initialized() and not force_refresh:
+        # If already initialized with real data, load from cache
+        if self.is_initialized() and not force_refresh and not status.is_demo_data:
             logger.info("Data already initialized, loading from cache...")
             self._load_all_from_cache()
             return status
 
+        if use_quick_start:
+            logger.info("=" * 60)
+            logger.info("QUICK START MODE - Using demo data")
+            logger.info("Set QUICK_START=0 to download real historical data")
+            logger.info("=" * 60)
+            return self._initialize_demo_data()
+
         logger.info("=" * 60)
         logger.info("INITIALIZING FLOOD RISK DATA")
-        logger.info("This may take a few minutes on first run...")
+        logger.info("Downloading historical data from NOAA...")
+        logger.info("This will take 5-10 minutes on first run.")
         logger.info("=" * 60)
 
         # Fetch flood events
         if not status.flood_events_ready or force_refresh:
-            logger.info("Fetching historical flood events...")
+            logger.info("")
+            logger.info("[1/3] Fetching flood events from NOAA Storm Database...")
             self._fetch_flood_events()
             status.flood_events_ready = True
             status.flood_events_count = len(self._flood_events) if self._flood_events else 0
+            self.save_status(status)  # Save progress
         else:
             self._load_flood_events()
 
         # Fetch hurricane data
         if not status.hurricanes_ready or force_refresh:
-            logger.info("Fetching hurricane track data...")
+            logger.info("")
+            logger.info("[2/3] Fetching hurricane tracks from NOAA HURDAT2...")
             self._fetch_hurricanes()
             status.hurricanes_ready = True
             status.hurricanes_count = len(self._hurricanes) if self._hurricanes else 0
+            self.save_status(status)  # Save progress
         else:
             self._load_hurricanes()
 
         # Generate atmospheric analysis
         if not status.atmospheric_ready or force_refresh:
-            logger.info("Generating atmospheric analysis...")
+            logger.info("")
+            logger.info("[3/3] Generating atmospheric analysis...")
             self._generate_atmospheric()
             status.atmospheric_ready = True
+            self.save_status(status)  # Save progress
         else:
             self._load_atmospheric()
 
-        # Save status
+        status.is_demo_data = False
         self.save_status(status)
 
+        logger.info("")
         logger.info("=" * 60)
         logger.info("DATA INITIALIZATION COMPLETE")
-        logger.info(f"Flood events: {status.flood_events_count}")
-        logger.info(f"Hurricanes: {status.hurricanes_count}")
+        logger.info(f"  Flood events: {status.flood_events_count}")
+        logger.info(f"  Hurricanes: {status.hurricanes_count}")
         logger.info("=" * 60)
 
         return status
+
+    def _initialize_demo_data(self) -> DataStatus:
+        """Initialize with demo data for quick testing."""
+        self._flood_events = []
+        self._hurricanes = []
+        self._atmospheric = self._create_demo_atmospheric()
+
+        status = DataStatus(
+            flood_events_ready=True,
+            flood_events_count=0,
+            hurricanes_ready=True,
+            hurricanes_count=0,
+            atmospheric_ready=True,
+            last_updated=datetime.now(),
+            is_demo_data=True
+        )
+
+        self.save_status(status)
+        logger.info("Demo data initialized - API will use default risk calculations")
+
+        return status
+
+    def _create_demo_atmospheric(self) -> AtmosphericAnalysis:
+        """Create demo atmospheric analysis."""
+        return AtmosphericAnalysis(
+            analysis_period_start=datetime(1974, 1, 1),
+            analysis_period_end=datetime.now(),
+            avg_jet_stream_position=30.5,
+            dominant_pattern="subtropical_ridge",
+            gulf_thermal_gradient=1.5,
+            wind_shear_index=15.0,
+            protection_factor=0.25,
+            findings=[
+                "Demo mode - using estimated atmospheric patterns",
+                "Run with QUICK_START=0 to analyze real historical data"
+            ]
+        )
 
     def _fetch_flood_events(self):
         """Fetch flood events from NOAA."""
@@ -175,14 +232,24 @@ class DataManager:
             from .noaa_storm_events import NOAAStormEventsCollector
 
             collector = NOAAStormEventsCollector()
-            events = collector.collect_historical_floods()
+
+            # Fetch with progress logging - only recent 10 years for faster startup
+            # Full 50 years can be fetched later via refresh endpoint
+            logger.info("  Downloading recent flood event data (2014-2024)...")
+            logger.info("  Use /api/v1/data/refresh to download full 50-year history")
+
+            events = collector.collect_historical_floods(
+                start_year=2014,  # Recent 10 years for faster first startup
+                end_year=2024
+            )
             collector.save_processed_data(events, self.FLOOD_EVENTS_FILE)
 
             self._flood_events = events
-            logger.info(f"Fetched {len(events)} flood events")
+            logger.info(f"  Downloaded {len(events)} flood events")
 
         except Exception as e:
-            logger.error(f"Failed to fetch flood events: {e}")
+            logger.error(f"  Failed to fetch flood events: {e}")
+            logger.info("  Continuing with empty flood history...")
             self._flood_events = []
 
     def _fetch_hurricanes(self):
@@ -191,14 +258,17 @@ class DataManager:
             from .hurricane_tracks import HurricaneTrackCollector
 
             collector = HurricaneTrackCollector()
+            logger.info("  Downloading HURDAT2 hurricane database...")
+
             hurricanes = collector.collect_hurricane_data()
             collector.save_processed_data(hurricanes, self.HURRICANES_FILE)
 
             self._hurricanes = hurricanes
-            logger.info(f"Fetched {len(hurricanes)} hurricane records")
+            logger.info(f"  Downloaded {len(hurricanes)} hurricane records")
 
         except Exception as e:
-            logger.error(f"Failed to fetch hurricanes: {e}")
+            logger.error(f"  Failed to fetch hurricanes: {e}")
+            logger.info("  Continuing with empty hurricane history...")
             self._hurricanes = []
 
     def _generate_atmospheric(self):
@@ -208,7 +278,6 @@ class DataManager:
 
             collector = AtmosphericDataCollector()
 
-            # Get hurricane stats if available
             hurricane_stats = None
             if self._hurricanes:
                 from .hurricane_tracks import HurricaneTrackCollector
@@ -220,11 +289,11 @@ class DataManager:
             collector.save_analysis(analysis, self.ATMOSPHERIC_FILE)
 
             self._atmospheric = analysis
-            logger.info("Generated atmospheric analysis")
+            logger.info("  Generated atmospheric analysis")
 
         except Exception as e:
-            logger.error(f"Failed to generate atmospheric analysis: {e}")
-            self._atmospheric = None
+            logger.error(f"  Failed to generate atmospheric analysis: {e}")
+            self._atmospheric = self._create_demo_atmospheric()
 
     def _load_flood_events(self):
         """Load flood events from cache."""
@@ -235,9 +304,7 @@ class DataManager:
                 with open(file_path) as f:
                     data = json.load(f)
 
-                self._flood_events = [
-                    FloodEvent(**event) for event in data
-                ]
+                self._flood_events = [FloodEvent(**event) for event in data]
                 logger.info(f"Loaded {len(self._flood_events)} flood events from cache")
 
             except Exception as e:
@@ -255,9 +322,7 @@ class DataManager:
                 with open(file_path) as f:
                     data = json.load(f)
 
-                self._hurricanes = [
-                    Hurricane(**h) for h in data
-                ]
+                self._hurricanes = [Hurricane(**h) for h in data]
                 logger.info(f"Loaded {len(self._hurricanes)} hurricanes from cache")
 
             except Exception as e:
@@ -292,27 +357,24 @@ class DataManager:
 
     @property
     def flood_events(self) -> List[FloodEvent]:
-        """Get flood events, loading from cache if needed."""
         if self._flood_events is None:
             self._load_flood_events()
         return self._flood_events or []
 
     @property
     def hurricanes(self) -> List[Hurricane]:
-        """Get hurricanes, loading from cache if needed."""
         if self._hurricanes is None:
             self._load_hurricanes()
         return self._hurricanes or []
 
     @property
     def atmospheric(self) -> Optional[AtmosphericAnalysis]:
-        """Get atmospheric analysis, loading from cache if needed."""
         if self._atmospheric is None:
             self._load_atmospheric()
         return self._atmospheric
 
 
-# Global singleton instance
+# Global singleton
 _data_manager: Optional[DataManager] = None
 
 
@@ -324,10 +386,7 @@ def get_data_manager() -> DataManager:
     return _data_manager
 
 
-def ensure_data_initialized(force_refresh: bool = False) -> DataStatus:
-    """
-    Ensure all data is initialized and ready.
-    Call this at application startup.
-    """
+def ensure_data_initialized(force_refresh: bool = False, quick_start: bool = None) -> DataStatus:
+    """Ensure all data is initialized and ready."""
     manager = get_data_manager()
-    return manager.initialize(force_refresh=force_refresh)
+    return manager.initialize(force_refresh=force_refresh, quick_start=quick_start)

@@ -7,6 +7,11 @@ echo     PINELLAS TRUE FLOOD RISK ASSESSMENT TOOL
 echo ============================================================
 echo.
 
+:: Check for command line argument
+set QUICK_START=1
+if "%1"=="--full" set QUICK_START=0
+if "%1"=="-f" set QUICK_START=0
+
 :: Check if Python is available
 where python >nul 2>nul
 if %ERRORLEVEL% neq 0 (
@@ -38,7 +43,7 @@ if not exist "backend\venv" (
 echo.
 echo Checking Python dependencies...
 call backend\venv\Scripts\activate.bat
-pip install -q -r backend\requirements.txt
+pip install -q -r backend\requirements.txt 2>nul
 
 :: Check/install Node dependencies
 if not exist "frontend\node_modules" (
@@ -51,39 +56,58 @@ if not exist "frontend\node_modules" (
     echo Frontend dependencies already installed.
 )
 
-:: Check if data has been initialized
+:: Show startup mode
 echo.
-if exist "backend\data\processed\data_status.json" (
-    echo Historical data cache found - will load from cache.
+if "%QUICK_START%"=="1" (
+    echo MODE: Quick Start (instant startup with demo calculations)
+    echo       Run "start.bat --full" to download real NOAA data
 ) else (
-    echo.
-    echo ============================================================
-    echo  FIRST RUN DETECTED
-    echo ============================================================
-    echo.
-    echo On first run, the system will download 50 years of
-    echo historical flood and hurricane data from NOAA.
-    echo This may take 5-10 minutes depending on your connection.
-    echo.
-    echo Data will be cached locally for instant startup next time.
-    echo ============================================================
-    echo.
+    echo MODE: Full Data (downloading historical data from NOAA)
+    echo       This may take 5-10 minutes on first run...
+)
+echo.
+
+:: Check if real data exists
+if exist "backend\data\processed\data_status.json" (
+    findstr /c:"is_demo_data\": false" "backend\data\processed\data_status.json" >nul 2>nul
+    if %ERRORLEVEL% equ 0 (
+        echo Historical data cache found - loading from cache.
+        set QUICK_START=0
+    )
 )
 
-:: Start backend server in background
+:: Start backend server
 echo.
 echo Starting backend API server...
-start "Flood Risk API" /min cmd /c "cd /d "%~dp0" && call backend\venv\Scripts\activate.bat && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --app-dir backend"
+start "Flood Risk API" /min cmd /c "cd /d "%~dp0" && call backend\venv\Scripts\activate.bat && set QUICK_START=%QUICK_START% && python -m uvicorn src.api.main:app --host 127.0.0.1 --port 8000 --app-dir backend"
 
-:: Wait for backend to start
+:: Wait for backend to start (shorter wait for quick start)
 echo Waiting for API to initialize...
-timeout /t 5 /nobreak >nul
 
-:: Check if backend is running
+if "%QUICK_START%"=="1" (
+    timeout /t 3 /nobreak >nul
+) else (
+    timeout /t 5 /nobreak >nul
+)
+
+:: Check if backend is running (with timeout)
+set ATTEMPTS=0
 :check_backend
+set /a ATTEMPTS+=1
 curl -s http://127.0.0.1:8000/health >nul 2>nul
 if %ERRORLEVEL% neq 0 (
-    echo Still initializing... (this may take a few minutes on first run)
+    if %ATTEMPTS% gtr 60 (
+        echo.
+        echo ERROR: API failed to start after 5 minutes.
+        echo Check the "Flood Risk API" window for errors.
+        pause
+        exit /b 1
+    )
+    if %ATTEMPTS% gtr 12 (
+        echo Still initializing... (%ATTEMPTS%/60 - downloading NOAA data)
+    ) else (
+        echo Starting...
+    )
     timeout /t 5 /nobreak >nul
     goto check_backend
 )
@@ -109,7 +133,10 @@ echo.
 echo  Web Interface: http://localhost:3000
 echo  API Docs:      http://127.0.0.1:8000/docs
 echo.
-echo  Press Ctrl+C or close this window to stop.
+echo  To download full historical data, visit:
+echo    http://127.0.0.1:8000/api/v1/data/refresh
+echo.
+echo  Press any key to stop all services.
 echo ============================================================
 echo.
 
@@ -117,9 +144,10 @@ echo.
 start http://localhost:3000
 
 :: Keep window open
-echo The application is running. Close this window to stop all services.
 pause >nul
 
 :: Cleanup - kill background processes
+echo Shutting down...
 taskkill /FI "WINDOWTITLE eq Flood Risk API" /F >nul 2>nul
 taskkill /FI "WINDOWTITLE eq Flood Risk Frontend" /F >nul 2>nul
+echo Done.
