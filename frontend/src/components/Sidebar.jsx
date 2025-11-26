@@ -9,6 +9,8 @@ function Sidebar({ selectedLocation, riskResult, loading, error, onAddressSearch
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [addressDbStatus, setAddressDbStatus] = useState({ addresses_loaded: 0 });
   const [downloadingAddresses, setDownloadingAddresses] = useState(false);
+  const [atmosphericAnalysis, setAtmosphericAnalysis] = useState(null);
+  const [loadingAnalysis, setLoadingAnalysis] = useState(false);
   const suggestionsRef = useRef(null);
   const inputRef = useRef(null);
 
@@ -100,6 +102,22 @@ function Sidebar({ selectedLocation, riskResult, loading, error, onAddressSearch
           disabled={!riskResult}
         >
           Results
+        </button>
+        <button
+          className={`tab ${activeTab === 'analysis' ? 'active' : ''}`}
+          onClick={() => {
+            setActiveTab('analysis');
+            if (!atmosphericAnalysis && !loadingAnalysis) {
+              setLoadingAnalysis(true);
+              fetch('/api/v1/analysis/atmospheric')
+                .then(res => res.json())
+                .then(data => setAtmosphericAnalysis(data))
+                .catch(err => console.error(err))
+                .finally(() => setLoadingAnalysis(false));
+            }
+          }}
+        >
+          Analysis
         </button>
         <button
           className={`tab ${activeTab === 'info' ? 'active' : ''}`}
@@ -259,6 +277,80 @@ function Sidebar({ selectedLocation, riskResult, loading, error, onAddressSearch
               <p>Click on the map or search an address to see flood risk results.</p>
             </div>
           )}
+        </div>
+      )}
+
+      {activeTab === 'analysis' && (
+        <div className="sidebar-section">
+          <h2>Hurricane Avoidance Analysis</h2>
+          <div className="info-panel">
+            {loadingAnalysis ? (
+              <div className="loading-spinner">
+                <div className="spinner"></div>
+                <p>Loading atmospheric analysis...</p>
+              </div>
+            ) : atmosphericAnalysis?.message ? (
+              <div>
+                <p style={{ color: '#92400e' }}>{atmosphericAnalysis.message}</p>
+                <p style={{ marginTop: '0.5rem' }}>Download historical data to run the analysis.</p>
+              </div>
+            ) : atmosphericAnalysis ? (
+              <div style={{ fontSize: '0.8125rem' }}>
+                <h3 style={{ fontSize: '1rem', marginBottom: '0.75rem', color: '#1e40af' }}>
+                  {atmosphericAnalysis.hypothesis?.question}
+                </h3>
+
+                <div style={{ background: '#dbeafe', padding: '0.75rem', borderRadius: '0.375rem', marginBottom: '1rem' }}>
+                  <strong>Primary Finding:</strong>
+                  <p style={{ margin: '0.25rem 0 0' }}>
+                    {atmosphericAnalysis.steering_flow_findings?.effect}
+                  </p>
+                </div>
+
+                <h4 style={{ fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0.5rem' }}>Jet Stream Analysis</h4>
+                <p><strong>Position:</strong> {atmosphericAnalysis.jet_stream_analysis?.average_position}</p>
+                <p><strong>Pattern:</strong> {atmosphericAnalysis.jet_stream_analysis?.dominant_pattern}</p>
+
+                <h4 style={{ fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0.5rem' }}>Tampa Bay Local Effects</h4>
+                <p>{atmosphericAnalysis.tampa_bay_local_effects?.thermal_effects}</p>
+                <p style={{ marginTop: '0.5rem' }}>
+                  <strong>Conclusion:</strong> {atmosphericAnalysis.tampa_bay_local_effects?.conclusion}
+                </p>
+
+                <h4 style={{ fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0.5rem' }}>Hurricane Statistics</h4>
+                <ul style={{ paddingLeft: '1.25rem' }}>
+                  <li>Total analyzed: {atmosphericAnalysis.hurricane_statistics?.total_analyzed}</li>
+                  <li>Near misses (50-200km): {atmosphericAnalysis.hurricane_statistics?.near_misses_50_200km}</li>
+                  <li>Direct hits (&lt;50km): {atmosphericAnalysis.hurricane_statistics?.direct_hits_under_50km}</li>
+                  <li>Hit rate: {atmosphericAnalysis.hurricane_statistics?.hit_rate}</li>
+                </ul>
+
+                <h4 style={{ fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0.5rem' }}>Protection Factor</h4>
+                <div style={{ background: '#fef3c7', padding: '0.75rem', borderRadius: '0.375rem' }}>
+                  <p><strong>{atmosphericAnalysis.protection_factor?.interpretation}</strong></p>
+                  <p style={{ fontSize: '0.75rem', color: '#92400e', marginTop: '0.25rem' }}>
+                    {atmosphericAnalysis.protection_factor?.caveat}
+                  </p>
+                </div>
+
+                <h4 style={{ fontSize: '0.875rem', marginTop: '1rem', marginBottom: '0.5rem' }}>Key Findings</h4>
+                <ul style={{ paddingLeft: '1.25rem' }}>
+                  {atmosphericAnalysis.key_findings?.map((finding, idx) => (
+                    <li key={idx} style={{ marginBottom: '0.25rem' }}>{finding}</li>
+                  ))}
+                </ul>
+
+                <div style={{ background: '#fee2e2', padding: '0.75rem', borderRadius: '0.375rem', marginTop: '1rem' }}>
+                  <strong style={{ color: '#dc2626' }}>Warning:</strong>
+                  <p style={{ margin: '0.25rem 0 0', color: '#991b1b' }}>
+                    {atmosphericAnalysis.conclusion?.warning}
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <p>Click to load atmospheric analysis</p>
+            )}
+          </div>
         </div>
       )}
 

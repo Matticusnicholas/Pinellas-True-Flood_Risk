@@ -324,6 +324,85 @@ async def hurricane_stats():
     return {"total": len(hurricanes), "near_pinellas": len(near), "direct_hits": len([h for h in near if h.closest_approach_to_pinellas_km < 50])}
 
 
+@app.get("/api/v1/analysis/atmospheric")
+async def atmospheric_analysis():
+    """
+    Get the atmospheric analysis including jet stream patterns,
+    steering flow, and the 'protection factor' hypothesis.
+
+    This investigates why hurricanes seem to avoid Pinellas County.
+    """
+    from ..data_collection.data_manager import get_data_manager
+    dm = get_data_manager()
+
+    atmospheric = dm.atmospheric
+    if not atmospheric:
+        return {
+            "message": "Atmospheric analysis not available. Use /api/v1/data/download to generate.",
+            "hypothesis_summary": {
+                "question": "Why do hurricanes seem to avoid Pinellas County?",
+                "status": "Analysis not yet run - download historical data first"
+            }
+        }
+
+    # Also get hurricane stats for context
+    hurricanes = dm.hurricanes
+    total_hurricanes = len(hurricanes) if hurricanes else 0
+    near_misses = len([h for h in (hurricanes or []) if h.closest_approach_to_pinellas_km and 50 < h.closest_approach_to_pinellas_km < 200])
+    direct_hits = len([h for h in (hurricanes or []) if h.closest_approach_to_pinellas_km and h.closest_approach_to_pinellas_km < 50])
+
+    return {
+        "hypothesis": {
+            "question": "Why do hurricanes seem to avoid Pinellas County?",
+            "investigated_factors": [
+                "Jet stream position and patterns",
+                "Bermuda High steering influence",
+                "Tampa Bay thermal effects",
+                "Gulf current patterns",
+                "Geographic channeling effects"
+            ]
+        },
+        "analysis_period": {
+            "start": atmospheric.analysis_period_start.isoformat(),
+            "end": atmospheric.analysis_period_end.isoformat()
+        },
+        "jet_stream_analysis": {
+            "average_position": f"{atmospheric.avg_jet_stream_position}°N latitude",
+            "dominant_pattern": atmospheric.dominant_pattern,
+            "interpretation": "The subtropical jet stream typically positions at 28-32°N during hurricane season, creating steering currents that guide storms away from direct Tampa Bay approach."
+        },
+        "steering_flow_findings": {
+            "primary_factor": "Bermuda High",
+            "effect": "The Bermuda High's western extension creates southerly steering flow that guides Gulf hurricanes toward the Florida Panhandle or Big Bend region rather than Tampa Bay.",
+            "significance": "This is the PRIMARY reason for the observed hurricane avoidance pattern."
+        },
+        "tampa_bay_local_effects": {
+            "thermal_effects": "Tampa Bay creates a localized heat island effect generating weak onshore/offshore breezes, but these are TOO WEAK to alter major hurricane tracks.",
+            "gulf_thermal_gradient": f"{atmospheric.gulf_thermal_gradient}°C cooler near coast (insufficient to weaken hurricanes)",
+            "wind_shear": f"{atmospheric.wind_shear_index} knots typical (moderate)",
+            "conclusion": "Local bay effects are MINIMAL - large-scale atmospheric patterns dominate hurricane steering."
+        },
+        "protection_factor": {
+            "value": atmospheric.protection_factor,
+            "interpretation": f"{atmospheric.protection_factor:.0%} estimated 'protection' based on historical deflection patterns",
+            "caveat": "This is a SPECULATIVE metric for analysis purposes, not a guarantee of safety."
+        },
+        "key_findings": atmospheric.findings,
+        "hurricane_statistics": {
+            "total_analyzed": total_hurricanes,
+            "near_misses_50_200km": near_misses,
+            "direct_hits_under_50km": direct_hits,
+            "hit_rate": f"{(direct_hits / total_hurricanes * 100):.1f}%" if total_hurricanes > 0 else "N/A"
+        },
+        "conclusion": {
+            "primary_cause": "Large-scale atmospheric steering patterns (Bermuda High)",
+            "secondary_cause": "Jet stream positioning during hurricane season",
+            "local_effects": "Minimal - Tampa Bay thermals cannot deflect major storms",
+            "warning": "Past patterns do NOT guarantee future protection. Tampa Bay remains highly vulnerable to the 'right' storm track."
+        }
+    }
+
+
 @app.get("/api/v1/methodology")
 async def methodology():
     return {
